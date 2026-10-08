@@ -39,6 +39,26 @@ down: ## Delete both kind clusters. Other kind clusters are left alone.
 	$(KIND) delete cluster --name $(CP_CLUSTER)
 	$(KIND) delete cluster --name $(FLEET_CLUSTER)
 
+##@ Platform
+
+CROSSPLANE_CHART_REPO ?= https://charts.crossplane.io/stable
+
+.PHONY: crossplane
+crossplane: ## Install Crossplane into the control-plane cluster with helm.
+	$(HELM) upgrade --install crossplane crossplane \
+		--repo $(CROSSPLANE_CHART_REPO) --version $(CROSSPLANE_VERSION) \
+		--namespace crossplane-system --create-namespace \
+		--kube-context $(CP_CTX) --wait
+
+.PHONY: packages
+packages: ## Install function-patch-and-transform and provider-kubernetes, wait until healthy.
+	$(KUBECTL) --context $(CP_CTX) apply -f platform/functions.yaml -f platform/provider.yaml
+	$(KUBECTL) --context $(CP_CTX) wait --for=condition=Healthy --timeout=5m \
+		function/function-patch-and-transform provider/provider-kubernetes
+	@# Healthy can flip to True before a bad runtime config crashes the pod, so also wait for the pod itself.
+	$(KUBECTL) --context $(CP_CTX) -n crossplane-system wait --for=condition=Ready --timeout=3m \
+		pod -l pkg.crossplane.io/provider=provider-kubernetes
+
 ##@ Tools
 
 LOCALBIN ?= $(CURDIR)/bin

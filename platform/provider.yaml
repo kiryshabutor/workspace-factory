@@ -1,0 +1,29 @@
+# provider-kubernetes delivers the tenant resources to fleet-cluster-1 as namespaced Objects.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-kubernetes
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            # Must be named package-runtime, otherwise Crossplane adds it as a sidecar.
+            - name: package-runtime
+              args:
+                # Watch the fleet objects, so drift (e.g. a deleted namespace) is fixed in seconds.
+                # Boolean flag: "--enable-watches=true" makes the provider exit with "unexpected true".
+                - --enable-watches
+                # Fallback resync in case a watch connection drops (default is 10m).
+                - --poll=1m
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-kubernetes
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/provider-kubernetes:v1.3.1
+  runtimeConfigRef:
+    name: provider-kubernetes
