@@ -24,6 +24,9 @@ help: ## Display this help.
 
 ##@ Environment
 
+.PHONY: up
+up: clusters crossplane packages connect-fleet platform ## Create everything: both clusters, Crossplane, provider, fleet connection, Workspace API.
+
 .PHONY: clusters
 clusters: ## Create both kind clusters (skips the ones that already exist).
 	@for c in $(CP_CLUSTER) $(FLEET_CLUSTER); do \
