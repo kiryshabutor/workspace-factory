@@ -1,0 +1,5 @@
+# Downloaded tools (Crossplane CLI)
+bin/
+
+# Kubeconfigs of the local clusters: the fleet one is cluster-admin, never commit it
+*.kubeconfig
