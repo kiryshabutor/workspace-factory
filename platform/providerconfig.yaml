@@ -1,0 +1,13 @@
+# How provider-kubernetes reaches fleet-cluster-1. Cluster-scoped, so developers' namespaces
+# never hold the fleet credentials; the Secret is created by `make connect-fleet`, not stored in git.
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: fleet-cluster-1
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: fleet-cluster-1-kubeconfig
+      key: kubeconfig

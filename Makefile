@@ -59,6 +59,16 @@ packages: ## Install function-patch-and-transform and provider-kubernetes, wait 
 	$(KUBECTL) --context $(CP_CTX) -n crossplane-system wait --for=condition=Ready --timeout=3m \
 		pod -l pkg.crossplane.io/provider=provider-kubernetes
 
+.PHONY: connect-fleet
+connect-fleet: ## Store the fleet kubeconfig in a Secret and create the ClusterProviderConfig.
+	@# --internal gives the fleet API address inside the docker network kind (fleet-cluster-1-control-plane:6443),
+	@# reachable from pods of the control-plane cluster. The kubeconfig goes through a pipe and never hits the disk.
+	$(KIND) get kubeconfig --internal --name $(FLEET_CLUSTER) \
+		| $(KUBECTL) --context $(CP_CTX) -n crossplane-system create secret generic $(FLEET_CLUSTER)-kubeconfig \
+			--from-file=kubeconfig=/dev/stdin --dry-run=client -o yaml \
+		| $(KUBECTL) --context $(CP_CTX) apply -f -
+	$(KUBECTL) --context $(CP_CTX) apply -f platform/providerconfig.yaml
+
 ##@ Tools
 
 LOCALBIN ?= $(CURDIR)/bin
