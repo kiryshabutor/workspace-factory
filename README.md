@@ -35,13 +35,13 @@ Why it is built this way: [docs/design.md](docs/design.md). A full walk-through 
 
 - Docker
 - [kind](https://kind.sigs.k8s.io/)
-- kubectl
+- kubectl v1.36 or newer (the clusters run Kubernetes 1.37, and kubectl supports one minor version of skew)
 - helm
 - make, curl
 
-Tested with kind v0.33.0 (Kubernetes v1.37.0, node image pinned by digest), kubectl v1.35.4, helm v4.3.0,
-Docker 29.1.3, Crossplane 2.4.2, provider-kubernetes v1.3.1, function-patch-and-transform v0.11.0,
-Crossplane CLI v2.5.0.
+Tested with kind v0.33.0 (Kubernetes v1.37.0, node image pinned by digest), helm v4.3.0, Docker 29.1.3,
+Crossplane 2.4.2, provider-kubernetes v1.3.1, function-patch-and-transform v0.11.0, Crossplane CLI v2.5.0, and
+kubectl v1.35.4 (outside the skew policy: it prints a warning, but everything worked).
 
 ### Run
 
@@ -60,11 +60,11 @@ kubectl --context kind-control-plane-cluster -n default get ws
 
 # 3. What landed on the fleet
 kubectl --context kind-fleet-cluster-1 -n dev-frontend get resourcequota,deploy,pods
-kubectl --context kind-fleet-cluster-1 -n dev-frontend port-forward deploy/welcome 15678:5678 &
-curl localhost:15678    # Welcome, dev-frontend!
-kill %1
+kubectl --context kind-fleet-cluster-1 -n dev-frontend port-forward deploy/welcome 15678:5678 & pf=$!
+curl --retry 10 --retry-connrefused --retry-delay 1 localhost:15678    # Welcome, dev-frontend!
+kill $pf
 
-# 4. Drift: delete the namespace on the fleet and watch it come back (usually 12-16 s)
+# 4. Drift: delete the namespace on the fleet and watch it come back (usually ~10 s; Ready in 12-16 s, sometimes up to ~100 s)
 kubectl --context kind-fleet-cluster-1 delete ns dev-frontend
 kubectl --context kind-fleet-cluster-1 get ns dev-frontend -w
 
@@ -85,6 +85,9 @@ make test   # no cluster needed, only Docker
   (`make test-update` regenerates it after an intended change);
 - validates the rendered resources against the XRD and the provider-kubernetes CRDs;
 - checks that every file in `examples/invalid/` is rejected by a CEL rule.
+
+It does not validate the Deployment inside an Object: provider-kubernetes keeps the manifest as free-form
+YAML, so a broken manifest is caught only by the fleet API server when the provider applies it.
 
 ## The Workspace API
 
@@ -117,9 +120,11 @@ Validation runs in the API server (CEL rules in the XRD), so a bad Workspace is 
 | `tenantName` | not a system namespace: `kube-*`, `default`, `local-path-storage` |
 | `tenantName` | immutable: changing it would move the tenant to another namespace, so create a new Workspace instead |
 | `cpuLimit`, `memoryLimit` | a Kubernetes quantity, at least `200m` / `256Mi` (room for two app pods during a rolling update) |
+| `spec.crossplane.compositionUpdatePolicy` | `Automatic` only: the platform picks the Composition and rolls out its revisions |
 
 `kubectl get ws` shows `TENANT`, `CPU` and `MEMORY` next to Crossplane's `SYNCED` and `READY`. A Workspace is
-`READY` only when the app on the fleet is `Available`, not merely when the manifests were accepted.
+`READY` only when the app's rollout on the fleet is complete (every replica runs the current template and is
+available), not merely when the manifests were accepted.
 
 ## Deviation from the task: provider-kubernetes
 

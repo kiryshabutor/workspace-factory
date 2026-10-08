@@ -1,0 +1,13 @@
+# Rejected by CEL: a developer may not pin a Composition revision (compositionUpdatePolicy: Manual)
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: pinned-revision
+  namespace: default
+spec:
+  crossplane:
+    compositionUpdatePolicy: Manual
+  parameters:
+    tenantName: dev-pinned
+    cpuLimit: "2"
+    memoryLimit: 4Gi

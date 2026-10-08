@@ -102,10 +102,20 @@ spec:
                   kind: ClusterProviderConfig
                   name: fleet-cluster-1
                 # A Deployment has no Ready condition, so DeriveFromObject would never pass.
-                # The Workspace becomes Ready only when the app actually serves traffic.
+                # Ready means the rollout is complete, the same checks as `kubectl rollout status`:
+                # the controller has seen the current spec, every replica runs the current template,
+                # no old replicas are left and all of them are available. Checking only Available=True
+                # would stay True while a broken new template crashes next to the old pod.
                 readiness:
                   policy: DeriveFromCelQuery
-                  celQuery: object.status.conditions.exists(c, c.type == "Available" && c.status == "True")
+                  celQuery: >-
+                    has(object.status.observedGeneration) &&
+                    object.status.observedGeneration == object.metadata.generation &&
+                    has(object.status.updatedReplicas) &&
+                    object.status.updatedReplicas == object.spec.replicas &&
+                    object.status.replicas == object.status.updatedReplicas &&
+                    has(object.status.availableReplicas) &&
+                    object.status.availableReplicas == object.status.updatedReplicas
                 forProvider:
                   manifest:
                     apiVersion: apps/v1

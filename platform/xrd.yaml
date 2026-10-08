@@ -13,7 +13,9 @@ spec:
     plural: workspaces
     shortNames: [ws]
     categories: [crossplane]
-  defaultCompositionRef:
+  # Enforced, not default: a developer may patch the Workspace, and with only a default
+  # they could point spec.crossplane.compositionRef at another Composition.
+  enforcedCompositionRef:
     name: workspace-fleet
   versions:
     - name: v1
@@ -37,6 +39,11 @@ spec:
             spec:
               type: object
               required: [parameters]
+              # spec.crossplane is added by Crossplane. enforcedCompositionRef fixes the Composition, but a
+              # developer could still pin an old revision of it with the Manual policy; allow only Automatic.
+              x-kubernetes-validations:
+                - rule: "!has(self.crossplane) || !has(self.crossplane.compositionUpdatePolicy) || self.crossplane.compositionUpdatePolicy == 'Automatic'"
+                  message: spec.crossplane.compositionUpdatePolicy must be Automatic; the platform rolls out Composition revisions
               properties:
                 parameters:
                   type: object

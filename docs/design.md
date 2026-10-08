@@ -87,7 +87,9 @@ error; the provider (Go resolver) moves on to the bare name and connects. No wor
 
 **Decision.** One cluster-scoped `ClusterProviderConfig fleet-cluster-1` reading the Secret
 `crossplane-system/fleet-cluster-1-kubeconfig`. `make connect-fleet` pipes the internal kubeconfig into the
-Secret; it never touches the disk or git. Every Object names it explicitly in `providerConfigRef`
+Secret; it never touches the disk or git. The Makefile runs recipes in `bash -o pipefail`, and the recipe
+stops if `kind` fails or prints an empty kubeconfig: in a plain `sh` pipe only the last command counts, so a
+failed `kind get kubeconfig` would overwrite a working Secret with an empty one and `make` would exit 0. Every Object names it explicitly in `providerConfigRef`
 (the CRD default is `{kind: ClusterProviderConfig, name: default}`, which does not exist here).
 
 **Why.** The credentials stay with the platform team in `crossplane-system`; developers cannot read them
@@ -103,8 +105,8 @@ ServiceAccount allowed to manage only namespaces, quotas and deployments.
 
 **Decision.** XRD `workspaces.platform.local`, `apiextensions.crossplane.io/v2`, `scope: Namespaced`,
 version `v1`; `spec.parameters.tenantName`, `cpuLimit`, `memoryLimit`, all required strings.
-`defaultCompositionRef: workspace-fleet` (developers don't pick a Composition), short name `ws`, printer
-columns `TENANT`, `CPU`, `MEMORY`.
+`enforcedCompositionRef: workspace-fleet` (developers don't pick a Composition, see below), short name `ws`,
+printer columns `TENANT`, `CPU`, `MEMORY`.
 
 Validation is CEL in the XRD, so the API server rejects a bad Workspace on `kubectl apply`, instead of the
 error surfacing later on the fleet:
@@ -116,6 +118,7 @@ error surfacing later on the fleet:
 | `tenantName` | `self == oldSelf` | a new name would create a second namespace and delete the first one with the tenant's app; create a new Workspace instead |
 | `cpuLimit`, `memoryLimit` | `isQuantity(self)` | a typo ("two cores") fails on apply, not on the fleet |
 | `cpuLimit`, `memoryLimit` | `!isQuantity(self) \|\| quantity(self).compareTo(quantity('200m')) >= 0` (`256Mi` for memory) | the app needs room for two pods during a rolling update (2 × 100m / 128Mi) |
+| `spec` | `self.crossplane.compositionUpdatePolicy == 'Automatic'` (if set) | a developer must not pin an old revision of the Composition, see below |
 
 Details that matter:
 
@@ -124,6 +127,16 @@ Details that matter:
 - Every string has `maxLength`: without it the API server estimates the `matches()` cost as unbounded and
   rejects the XRD ("estimated rule cost exceeds budget").
 - `self == oldSelf` on a field is a transition rule: it runs on updates only.
+
+**Who picks the Composition.** A developer may patch their Workspace, and RBAC cannot hide single fields,
+so with `defaultCompositionRef` they could set `spec.crossplane.compositionRef` to any other Composition in
+the cluster (checked: `frontend-dev` switched a Workspace to a test Composition and the app on the fleet
+changed). With `enforcedCompositionRef` Crossplane resets the field on the next reconcile. The enforced ref
+does not cover revisions: with `compositionUpdatePolicy: Manual` and `compositionRevisionRef` a developer
+could still pin an old or broken revision of `workspace-fleet`, so the CEL rule on `spec` allows only
+`Automatic`. The price: `enforcedCompositionRef` is immutable in the XRD. Template changes go into new
+revisions of `workspace-fleet`, which is the normal path; moving to a Composition with another name would
+mean recreating the XRD, and that deletes every Workspace.
 
 **Limitation.** CEL sees only the object being validated, so two Workspaces with the same `tenantName` in
 different namespaces are not caught; they would fight over one fleet namespace. That needs an admission
@@ -175,12 +188,17 @@ render-fleet-resources (function-patch-and-transform)
 
 | Object | `spec.readiness.policy` | Why |
 |---|---|---|
-| Deployment | `DeriveFromCelQuery`: `object.status.conditions.exists(c, c.type == "Available" && c.status == "True")` | the Workspace is Ready only when the app actually serves |
+| Deployment | `DeriveFromCelQuery`: the rollout is complete, the same checks as `kubectl rollout status`: `status.observedGeneration == metadata.generation`, `updatedReplicas == spec.replicas`, `replicas == updatedReplicas`, `availableReplicas == updatedReplicas` | the Workspace is Ready only when the current template actually serves |
 | Namespace, ResourceQuota | default `SuccessfulCreate` | they have no conditions; created means done |
 
 **Why.** With the default, a wrong image or a pod that does not fit the quota would leave the Workspace
-`READY=True` with the app down. Now the chain is honest: Deployment `Available` → Object Ready → Workspace
-Ready.
+`READY=True` with the app down. Now the chain is honest: rollout complete → Object Ready → Workspace Ready.
+
+Checking only the `Available=True` condition is not enough: when a new Composition revision brings a broken
+template, the old pod keeps serving, `Available` stays `True`, and the Workspace said `READY=True` while the
+new pod was in `ImagePullBackOff`. With the rollout checks the same scenario gives `READY=False` while the old
+pod still serves (checked by applying a Composition with a nonexistent image tag). The Deployment controller
+omits zero counters from `status`, so every counter is guarded with `has()`.
 
 **Rejected.** *`DeriveFromObject`*: it looks for a `Ready` condition, which a Deployment does not have
 (only `Available` and `Progressing`), so the Object would never become Ready.
@@ -193,8 +211,10 @@ a sidecar), and every Object has `spec.watch: true`.
 
 **Why.** By default the provider re-checks the fleet every 10 minutes: a deleted namespace would stay gone
 that long. With watches it sees the change immediately. Measured: a deleted namespace is back in ~10 s and
-the Workspace is Ready again in 12-16 s in three of four runs (most of it is Kubernetes finishing the
-namespace deletion); one run took ~57 s, probably because the provider's retries had backed off; a manual
+the Workspace is Ready again in 12-16 s in four of six runs (most of it is Kubernetes finishing the
+namespace deletion). Two runs took ~57 s and ~101 s: the namespace was `Terminating` longer, the provider's
+retries to re-create the ResourceQuota in it backed off, and the quota Object became Ready only on the next
+poll (see the [demo guide](demo-guide.md#5-drift-delete-the-tenant-namespace-on-the-fleet)); a manual
 `scale --replicas=3` is reverted within the same second. The poll is a safety net for events lost while a
 watch connection is down.
 
@@ -283,6 +303,7 @@ Crossplane image that `crossplane composition render` and `resource validate` ru
 | provider-kubernetes | v1.3.1 | v1.4.0 was released a day before this work and changes defaults (watches on by default, failing start without readable ProviderConfigs); the flags are set explicitly anyway |
 | function-patch-and-transform | v0.11.0 | |
 | Crossplane CLI | v2.5.0 | downloaded into `./bin` by the Makefile |
+| kubectl | v1.36+ recommended | tested with v1.35.4, one minor outside the ±1 skew policy for Kubernetes 1.37: it prints a warning, everything worked |
 
 ## 13. Tests
 
@@ -297,6 +318,12 @@ Crossplane image that `crossplane composition render` and `resource validate` ru
    schema download does not count as a pass.
 
 Breaking the Composition (changing the greeting) or "fixing" an invalid example makes `make test` fail.
+
+The boundary: `resource validate` checks an Object against the provider's CRD, where `forProvider.manifest`
+is free-form (`x-kubernetes-preserve-unknown-fields`). The Deployment inside is not validated: a golden file
+with `replicas: definitely-not-an-integer` passes. Such a manifest is rejected only by the fleet API server
+when the provider applies it. Catching it offline would take the Kubernetes OpenAPI schemas and a second tool
+(e.g. kubeconform on the extracted manifests); `make test` stays with the Crossplane CLI only.
 The transition rule `self == oldSelf` cannot be checked offline; it is covered in the demo guide. The live
 behaviour (Ready, drift, deletion) is checked by hand following the [demo guide](demo-guide.md); there is no
 automated end-to-end test or CI.

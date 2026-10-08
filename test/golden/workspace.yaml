@@ -109,8 +109,11 @@ spec:
     kind: ClusterProviderConfig
     name: fleet-cluster-1
   readiness:
-    celQuery: object.status.conditions.exists(c, c.type == "Available" && c.status
-      == "True")
+    celQuery: has(object.status.observedGeneration) && object.status.observedGeneration
+      == object.metadata.generation && has(object.status.updatedReplicas) && object.status.updatedReplicas
+      == object.spec.replicas && object.status.replicas == object.status.updatedReplicas
+      && has(object.status.availableReplicas) && object.status.availableReplicas ==
+      object.status.updatedReplicas
     policy: DeriveFromCelQuery
   watch: true
 ---

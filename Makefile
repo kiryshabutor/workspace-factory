@@ -13,6 +13,15 @@ KIND    ?= kind
 KUBECTL ?= kubectl
 HELM    ?= helm
 
+# bash with pipefail: a failing command in the middle of a pipe fails the recipe,
+# not only the last one (connect-fleet must not store an empty kubeconfig).
+SHELL       := bash
+.SHELLFLAGS := -eu -o pipefail -c
+
+# The steps of `make up` depend on each other in order (cluster -> Crossplane -> packages -> XRD),
+# so `make -j` must not run them side by side.
+.NOTPARALLEL:
+
 .PHONY: all
 all: help
 
@@ -65,8 +74,11 @@ packages: ## Install function-patch-and-transform and provider-kubernetes, wait 
 .PHONY: connect-fleet
 connect-fleet: ## Store the fleet kubeconfig in a Secret and create the ClusterProviderConfig.
 	@# --internal gives the fleet API address inside the docker network kind (fleet-cluster-1-control-plane:6443),
-	@# reachable from pods of the control-plane cluster. The kubeconfig goes through a pipe and never hits the disk.
-	$(KIND) get kubeconfig --internal --name $(FLEET_CLUSTER) \
+	@# reachable from pods of the control-plane cluster. The kubeconfig stays in a shell variable and a pipe,
+	@# it never hits the disk. If kind fails or prints nothing, stop before the Secret is overwritten.
+	kubeconfig="$$($(KIND) get kubeconfig --internal --name $(FLEET_CLUSTER))"; \
+	if [ -z "$$kubeconfig" ]; then echo "kind returned an empty kubeconfig for $(FLEET_CLUSTER)" >&2; exit 1; fi; \
+	printf '%s\n' "$$kubeconfig" \
 		| $(KUBECTL) --context $(CP_CTX) -n crossplane-system create secret generic $(FLEET_CLUSTER)-kubeconfig \
 			--from-file=kubeconfig=/dev/stdin --dry-run=client -o yaml \
 		| $(KUBECTL) --context $(CP_CTX) apply -f -
@@ -93,9 +105,11 @@ test: $(CROSSPLANE_CLI) ## Render the example, diff against the golden file, val
 	$(RENDER) examples/workspace.yaml platform/composition.yaml platform/functions.yaml | diff -u $(GOLDEN) -
 	$(VALIDATE) --skip-success-results platform/xrd.yaml,platform/provider.yaml $(GOLDEN)
 	@# Every file in examples/invalid breaks one CEL rule and must be rejected by that rule,
-	@# not by some other error (e.g. a failed schema download).
+	@# not by some other error (e.g. a failed schema download). validate exits non-zero here on purpose,
+	@# so its output is captured first instead of piped (pipefail would turn the pipe into a failure).
 	@for f in examples/invalid/*.yaml; do \
-		if $(VALIDATE) platform/xrd.yaml $$f 2>&1 | grep -q 'CEL validation error'; then \
+		out="$$($(VALIDATE) platform/xrd.yaml $$f 2>&1 || true)"; \
+		if grep -q 'CEL validation error' <<<"$$out"; then \
 			echo "ok: $$f rejected by CEL"; \
 		else \
 			echo "FAIL: $$f was not rejected by a CEL rule"; exit 1; \
@@ -121,6 +135,9 @@ CROSSPLANE_CLI ?= $(LOCALBIN)/crossplane-$(CROSSPLANE_CLI_VERSION)
 
 .PHONY: crossplane-cli
 crossplane-cli: $(CROSSPLANE_CLI) ## Download the Crossplane CLI into ./bin.
+# Download into a temp file and rename it only on success, so an interrupted download
+# does not leave a broken binary that make would treat as up to date.
 $(CROSSPLANE_CLI): | $(LOCALBIN)
-	curl -sSfL -o $@ https://cli.crossplane.io/stable/$(CROSSPLANE_CLI_VERSION)/bin/$(OS)_$(ARCH)/crossplane
-	chmod +x $@
+	curl -sSfL -o $@.tmp https://cli.crossplane.io/stable/$(CROSSPLANE_CLI_VERSION)/bin/$(OS)_$(ARCH)/crossplane
+	chmod +x $@.tmp
+	mv $@.tmp $@

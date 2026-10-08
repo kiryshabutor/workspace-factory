@@ -43,6 +43,7 @@ cluster-scoped `objects.kubernetes.crossplane.io`, and a bare `kubectl get objec
 The resource tree:
 
 ```bash
+make crossplane-cli    # downloads the CLI into ./bin once; make up does not need it
 ./bin/crossplane-v2.5.0 resource trace --context kind-control-plane-cluster -n default workspace.platform.local/frontend-dev-env
 ```
 
@@ -58,9 +59,9 @@ Workspace/frontend-dev-env (default)                True     True    Available
 
 ```bash
 fleet -n dev-frontend get resourcequota,deploy,pods
-fleet -n dev-frontend port-forward deploy/welcome 15678:5678 &
-curl localhost:15678
-kill %1
+fleet -n dev-frontend port-forward deploy/welcome 15678:5678 & pf=$!
+curl --retry 10 --retry-connrefused --retry-delay 1 localhost:15678    # port-forward needs a moment to listen
+kill $pf
 ```
 
 Expected: quota `limits.cpu: 100m/2, limits.memory: 128Mi/4Gi` (the app pod uses 100m/128Mi),
@@ -75,6 +76,19 @@ fleet -n dev-frontend get resourcequota workspace-quota
 
 Expected: `limits.cpu` becomes `4` on the fleet in under a second. Put it back with
 `cpk apply -f examples/workspace.yaml`.
+
+A broken template (platform side). `READY` means the rollout is complete, not only that some pod serves:
+
+```bash
+sed 's#http-echo:1.0.0#http-echo:0.0.0-broken#' platform/composition.yaml | cpk apply -f -
+sleep 30; fleet -n dev-frontend get pods; cpk -n default get ws
+cpk apply -f platform/composition.yaml
+cpk -n default wait --for=condition=Ready ws/frontend-dev-env --timeout=2m
+```
+
+Expected: the new pod is in `ErrImagePull` / `ImagePullBackOff`, the old one keeps `Running` and serving, and the Workspace
+is `READY=False`. After the good Composition is back, the broken ReplicaSet is scaled down and the Workspace
+is Ready again within seconds.
 
 ## 5. Drift: delete the tenant namespace on the fleet
 
@@ -99,9 +113,13 @@ Measured timeline:
 | ~10 s | namespace re-created (new UID), quota back | `READY=False` |
 | ~12-16 s | Deployment available again | `READY=True` |
 
-Three of four measured runs took 12-16 s. One run, made a minute after the Workspace was created,
-took ~57 s (namespace back at ~25 s, Workspace Ready at ~57 s) with the circuit breaker closed, probably
-because the provider's retries against the `Terminating` namespace had already backed off.
+Four of six measured runs (with the circuit breaker closed) took 12-16 s. Two runs, each the first drift
+after the Workspace was created, were slow: the namespace took ~25 s to delete instead of ~10 s, and the
+Workspace was Ready at ~57 s and ~101 s. The timestamps of the second one show why: the Deployment Object was
+Ready 2 s after the namespace came back, but the ResourceQuota Object was re-created only ~16 s later and
+marked Ready only on the next poll a minute after that. While the namespace is `Terminating`, the provider's
+attempts to create the quota in it fail and its retries back off. The app itself serves again within
+seconds of the namespace coming back; only the Workspace's `READY` lags.
 
 Why it is fast: provider-kubernetes runs with `--enable-watches` and every Object has `spec.watch: true`,
 so the provider sees the deletion as it happens. `--poll=1m` is the fallback if a watch drops.
@@ -151,6 +169,19 @@ cpk auth can-i create workspaces.platform.local -n default --as=frontend-dev    
 cpk auth can-i create objects.kubernetes.m.crossplane.io -n default --as=frontend-dev   # no
 cpk auth can-i get secrets -n crossplane-system --as=frontend-dev                       # no
 ```
+
+The developer may patch the Workspace, but not choose what it turns into:
+
+```bash
+cpk -n default patch ws frontend-dev-env --as=frontend-dev --type=merge \
+  -p '{"spec":{"crossplane":{"compositionRef":{"name":"something-else"}}}}'
+sleep 3; cpk -n default get ws frontend-dev-env -o jsonpath='{.spec.crossplane.compositionRef.name}{"\n"}'
+cpk -n default patch ws frontend-dev-env --as=frontend-dev --type=merge \
+  -p '{"spec":{"crossplane":{"compositionUpdatePolicy":"Manual"}}}'
+```
+
+Expected: the first patch is accepted, but Crossplane puts `workspace-fleet` back (`enforcedCompositionRef`).
+The second is rejected by CEL: `compositionUpdatePolicy must be Automatic`.
 
 ## 9. Delete the Workspace
 
