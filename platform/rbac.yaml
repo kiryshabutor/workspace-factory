@@ -1,0 +1,18 @@
+# What a developer may do on the control plane: manage Workspaces, and read (never write) the
+# Objects they render to troubleshoot a Workspace that is not Ready. Writing Objects directly would
+# let a developer put any manifest on the fleet through the fleet-cluster-1 ClusterProviderConfig,
+# which is why neither the built-in "edit" nor Crossplane's "crossplane-edit" role fits here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: workspace-developer
+rules:
+  - apiGroups: [platform.local]
+    resources: [workspaces]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [kubernetes.m.crossplane.io]
+    resources: [objects]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch]

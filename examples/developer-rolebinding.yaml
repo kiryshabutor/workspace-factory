@@ -1,0 +1,15 @@
+# Grants the workspace-developer role in one namespace only. kind has no real users,
+# so check it with impersonation: kubectl auth can-i ... --as=frontend-dev
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: frontend-dev-workspaces
+  namespace: default
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: frontend-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: workspace-developer
