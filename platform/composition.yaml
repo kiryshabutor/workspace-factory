@@ -1,0 +1,172 @@
+# Renders a Workspace into three provider-kubernetes Objects. Each Object carries one manifest
+# that provider-kubernetes applies on fleet-cluster-1: the tenant Namespace, its ResourceQuota
+# and a welcome app. The Objects themselves live next to the Workspace on the control plane.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: workspace-fleet
+spec:
+  compositeTypeRef:
+    apiVersion: platform.local/v1
+    kind: Workspace
+  mode: Pipeline
+  pipeline:
+    - step: render-fleet-resources
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        # Shared by every resource: links the fleet object back to the Workspace that owns it.
+        patchSets:
+          - name: workspace-annotation
+            patches:
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: metadata.namespace
+                    - fromFieldPath: metadata.name
+                  strategy: string
+                  string:
+                    fmt: "%s/%s"
+                toFieldPath: spec.forProvider.manifest.metadata.annotations[platform.local/workspace]
+        # No metadata.name/namespace on the Objects: Crossplane generates the name and puts them
+        # in the Workspace namespace. deletionPolicy does not exist on namespaced MRs; the default
+        # managementPolicies ["*"] deletes the fleet object together with the Workspace.
+        resources:
+          - name: namespace
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                # Re-create the namespace within seconds if someone deletes it on the fleet.
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: fleet-cluster-1
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: Namespace
+                    metadata:
+                      labels:
+                        app.kubernetes.io/managed-by: crossplane
+            patches:
+              - type: PatchSet
+                patchSetName: workspace-annotation
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tenantName
+                toFieldPath: spec.forProvider.manifest.metadata.name
+
+          - name: resourcequota
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: fleet-cluster-1
+                forProvider:
+                  manifest:
+                    apiVersion: v1
+                    kind: ResourceQuota
+                    metadata:
+                      name: workspace-quota
+                      labels:
+                        app.kubernetes.io/managed-by: crossplane
+                    # Only limits: every pod in the namespace must then declare limits.
+                    spec:
+                      hard: {}
+            patches:
+              - type: PatchSet
+                patchSetName: workspace-annotation
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tenantName
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              # The keys contain a dot, so they go in brackets.
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.cpuLimit
+                toFieldPath: spec.forProvider.manifest.spec.hard[limits.cpu]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.memoryLimit
+                toFieldPath: spec.forProvider.manifest.spec.hard[limits.memory]
+
+          - name: deployment
+            base:
+              apiVersion: kubernetes.m.crossplane.io/v1alpha1
+              kind: Object
+              spec:
+                watch: true
+                providerConfigRef:
+                  kind: ClusterProviderConfig
+                  name: fleet-cluster-1
+                # A Deployment has no Ready condition, so DeriveFromObject would never pass.
+                # The Workspace becomes Ready only when the app actually serves traffic.
+                readiness:
+                  policy: DeriveFromCelQuery
+                  celQuery: object.status.conditions.exists(c, c.type == "Available" && c.status == "True")
+                forProvider:
+                  manifest:
+                    apiVersion: apps/v1
+                    kind: Deployment
+                    metadata:
+                      name: welcome
+                      labels:
+                        app.kubernetes.io/name: welcome
+                        app.kubernetes.io/managed-by: crossplane
+                    spec:
+                      replicas: 1
+                      selector:
+                        matchLabels:
+                          app.kubernetes.io/name: welcome
+                      template:
+                        metadata:
+                          labels:
+                            app.kubernetes.io/name: welcome
+                        spec:
+                          securityContext:
+                            # The image already runs as uid 65532 (distroless nonroot).
+                            runAsNonRoot: true
+                            seccompProfile:
+                              type: RuntimeDefault
+                          containers:
+                            - name: welcome
+                              image: hashicorp/http-echo:1.0.0
+                              args:
+                                - -text=Welcome!
+                              ports:
+                                - name: http
+                                  containerPort: 5678
+                              readinessProbe:
+                                httpGet:
+                                  path: /
+                                  port: http
+                              # Limits are mandatory: the namespace quota only counts limits.
+                              # 100m/128Mi per pod leaves room for a second pod during a rolling update.
+                              resources:
+                                requests:
+                                  cpu: 50m
+                                  memory: 64Mi
+                                limits:
+                                  cpu: 100m
+                                  memory: 128Mi
+                              securityContext:
+                                allowPrivilegeEscalation: false
+                                readOnlyRootFilesystem: true
+                                capabilities:
+                                  drop: [ALL]
+            patches:
+              - type: PatchSet
+                patchSetName: workspace-annotation
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.parameters.tenantName
+                toFieldPath: spec.forProvider.manifest.metadata.namespace
+              - type: CombineFromComposite
+                combine:
+                  variables:
+                    - fromFieldPath: spec.parameters.tenantName
+                  strategy: string
+                  string:
+                    fmt: "-text=Welcome, %s!"
+                toFieldPath: spec.forProvider.manifest.spec.template.spec.containers[0].args[0]

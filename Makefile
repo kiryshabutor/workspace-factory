@@ -70,9 +70,10 @@ connect-fleet: ## Store the fleet kubeconfig in a Secret and create the ClusterP
 	$(KUBECTL) --context $(CP_CTX) apply -f platform/providerconfig.yaml
 
 .PHONY: platform
-platform: ## Apply the Workspace API: XRD (and later the Composition and RBAC).
+platform: ## Apply the Workspace API: XRD and Composition (and later RBAC).
 	$(KUBECTL) --context $(CP_CTX) apply -f platform/xrd.yaml
 	$(KUBECTL) --context $(CP_CTX) wait --for=condition=Established --timeout=2m xrd/workspaces.platform.local
+	$(KUBECTL) --context $(CP_CTX) apply -f platform/composition.yaml
 
 ##@ Tools
 
