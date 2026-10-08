@@ -24,6 +24,16 @@ help: ## Display this help.
 
 ##@ Environment
 
+.PHONY: clusters
+clusters: ## Create both kind clusters (skips the ones that already exist).
+	@for c in $(CP_CLUSTER) $(FLEET_CLUSTER); do \
+		if $(KIND) get clusters | grep -qx "$$c"; then \
+			echo "kind cluster $$c already exists"; \
+		else \
+			$(KIND) create cluster --config clusters/$$c.yaml; \
+		fi; \
+	done
+
 .PHONY: down
 down: ## Delete both kind clusters. Other kind clusters are left alone.
 	$(KIND) delete cluster --name $(CP_CLUSTER)
