@@ -118,7 +118,7 @@ error surfacing later on the fleet:
 | `tenantName` | `self == oldSelf` | a new name would create a second namespace and delete the first one with the tenant's app; create a new Workspace instead |
 | `cpuLimit`, `memoryLimit` | `isQuantity(self)` | a typo ("two cores") fails on apply, not on the fleet |
 | `cpuLimit`, `memoryLimit` | `!isQuantity(self) \|\| quantity(self).compareTo(quantity('200m')) >= 0` (`256Mi` for memory) | the app needs room for two pods during a rolling update (2 × 100m / 128Mi) |
-| `spec` | `self.crossplane.compositionUpdatePolicy == 'Automatic'` (if set) | a developer must not pin an old revision of the Composition, see below |
+| `spec` | `self.crossplane.compositionUpdatePolicy == 'Automatic'` (if set), no `self.crossplane.compositionRevisionSelector` | a developer must not pin an old revision of the Composition, see below |
 
 Details that matter:
 
@@ -132,9 +132,12 @@ Details that matter:
 so with `defaultCompositionRef` they could set `spec.crossplane.compositionRef` to any other Composition in
 the cluster (checked: `frontend-dev` switched a Workspace to a test Composition and the app on the fleet
 changed). With `enforcedCompositionRef` Crossplane resets the field on the next reconcile. The enforced ref
-does not cover revisions: with `compositionUpdatePolicy: Manual` and `compositionRevisionRef` a developer
-could still pin an old or broken revision of `workspace-fleet`, so the CEL rule on `spec` allows only
-`Automatic`. The price: `enforcedCompositionRef` is immutable in the XRD. Template changes go into new
+does not cover revisions. A developer could still pin an old or broken revision of `workspace-fleet` in two
+ways: `compositionUpdatePolicy: Manual` with `compositionRevisionRef`, or a `compositionRevisionSelector`
+matching the `crossplane.io/composition-hash` label of an old revision (with `Automatic`, Crossplane picks
+the newest revision among those the selector matches). So the CEL rules on `spec` allow only `Automatic` and
+no selector. `compositionRevisionRef` itself stays allowed, because Crossplane writes it. What CEL does not
+stop is the `crossplane.io/paused` annotation (see Known limitations in the README). The price: `enforcedCompositionRef` is immutable in the XRD. Template changes go into new
 revisions of `workspace-fleet`, which is the normal path; moving to a Composition with another name would
 mean recreating the XRD, and that deletes every Workspace.
 

@@ -1,0 +1,15 @@
+# Rejected by CEL: a developer may not pick Composition revisions with a selector
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: revision-selector
+  namespace: default
+spec:
+  crossplane:
+    compositionRevisionSelector:
+      matchLabels:
+        crossplane.io/composition-hash: f115030bce281172098f75d002653194db154455d38dd98ab9bac38c21ba23a
+  parameters:
+    tenantName: dev-selector
+    cpuLimit: "2"
+    memoryLimit: 4Gi

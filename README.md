@@ -37,7 +37,7 @@ Why it is built this way: [docs/design.md](docs/design.md). A full walk-through 
 - [kind](https://kind.sigs.k8s.io/)
 - kubectl v1.36 or newer (the clusters run Kubernetes 1.37, and kubectl supports one minor version of skew)
 - helm
-- make, curl
+- GNU make (the macOS default 3.81 works), bash, curl
 
 Tested with kind v0.33.0 (Kubernetes v1.37.0, node image pinned by digest), helm v4.3.0, Docker 29.1.3,
 Crossplane 2.4.2, provider-kubernetes v1.3.1, function-patch-and-transform v0.11.0, Crossplane CLI v2.5.0, and
@@ -120,7 +120,7 @@ Validation runs in the API server (CEL rules in the XRD), so a bad Workspace is 
 | `tenantName` | not a system namespace: `kube-*`, `default`, `local-path-storage` |
 | `tenantName` | immutable: changing it would move the tenant to another namespace, so create a new Workspace instead |
 | `cpuLimit`, `memoryLimit` | a Kubernetes quantity, at least `200m` / `256Mi` (room for two app pods during a rolling update) |
-| `spec.crossplane.compositionUpdatePolicy` | `Automatic` only: the platform picks the Composition and rolls out its revisions |
+| `spec.crossplane.compositionUpdatePolicy`, `compositionRevisionSelector` | `Automatic` only, no revision selector: the platform picks the Composition and rolls out its revisions |
 
 `kubectl get ws` shows `TENANT`, `CPU` and `MEMORY` next to Crossplane's `SYNCED` and `READY`. A Workspace is
 `READY` only when the app's rollout on the fleet is complete (every replica runs the current template and is
@@ -175,6 +175,9 @@ The fleet kubeconfig is never written to disk or git: `make connect-fleet` pipes
   ServiceAccount on the fleet limited to namespaces, quotas and deployments.
 - **Watches are an alpha feature** of provider-kubernetes. `--poll=1m` keeps drift correction working if a
   watch drops; without watches, drift is fixed on the next poll instead of within seconds.
+- **A developer can pause their own Workspace** with the `crossplane.io/paused: "true"` annotation: Crossplane
+  then stops reconciling it, including new Composition revisions. It affects only that tenant (the provider
+  still keeps the existing fleet resources in place); blocking it would take an admission policy.
 - **Deleting the XRD deletes every Workspace** and, with the default delete behaviour, every tenant namespace
   on the fleet. The app is stateless, so re-applying brings everything back; only platform admins may change
   the XRD and the Composition (developers get `workspace-developer` only).

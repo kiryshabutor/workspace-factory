@@ -15,8 +15,8 @@ HELM    ?= helm
 
 # bash with pipefail: a failing command in the middle of a pipe fails the recipe,
 # not only the last one (connect-fleet must not store an empty kubeconfig).
-SHELL       := bash
-.SHELLFLAGS := -eu -o pipefail -c
+# The flags are part of SHELL, not .SHELLFLAGS: GNU Make 3.81 (the macOS default) ignores .SHELLFLAGS.
+SHELL := /bin/bash -eu -o pipefail
 
 # The steps of `make up` depend on each other in order (cluster -> Crossplane -> packages -> XRD),
 # so `make -j` must not run them side by side.

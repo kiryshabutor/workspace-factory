@@ -40,10 +40,14 @@ spec:
               type: object
               required: [parameters]
               # spec.crossplane is added by Crossplane. enforcedCompositionRef fixes the Composition, but a
-              # developer could still pin an old revision of it with the Manual policy; allow only Automatic.
+              # developer could still pin an old revision of it: with the Manual policy, or with a revision
+              # selector (Automatic picks the newest revision among those the selector matches).
+              # compositionRevisionRef itself stays allowed: Crossplane writes it.
               x-kubernetes-validations:
                 - rule: "!has(self.crossplane) || !has(self.crossplane.compositionUpdatePolicy) || self.crossplane.compositionUpdatePolicy == 'Automatic'"
                   message: spec.crossplane.compositionUpdatePolicy must be Automatic; the platform rolls out Composition revisions
+                - rule: "!has(self.crossplane) || !has(self.crossplane.compositionRevisionSelector)"
+                  message: spec.crossplane.compositionRevisionSelector is not allowed; the platform rolls out Composition revisions
               properties:
                 parameters:
                   type: object

@@ -181,7 +181,8 @@ cpk -n default patch ws frontend-dev-env --as=frontend-dev --type=merge \
 ```
 
 Expected: the first patch is accepted, but Crossplane puts `workspace-fleet` back (`enforcedCompositionRef`).
-The second is rejected by CEL: `compositionUpdatePolicy must be Automatic`.
+The second is rejected by CEL: `compositionUpdatePolicy must be Automatic`. A `compositionRevisionSelector`
+is rejected the same way (`examples/invalid/revision-selector.yaml`).
 
 ## 9. Delete the Workspace
 
