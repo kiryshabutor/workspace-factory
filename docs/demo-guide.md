@@ -97,7 +97,11 @@ Measured timeline:
 | 0 s | namespace `Terminating` | `READY=True` |
 | ~5 s | pod gone | `READY=False` |
 | ~10 s | namespace re-created (new UID), quota back | `READY=False` |
-| ~12 s | Deployment available again | `READY=True` |
+| ~12-16 s | Deployment available again | `READY=True` |
+
+Three of four measured runs took 12-16 s. One run, made a minute after the Workspace was created,
+took ~57 s (namespace back at ~25 s, Workspace Ready at ~57 s) with the circuit breaker closed, probably
+because the provider's retries against the `Terminating` namespace had already backed off.
 
 Why it is fast: provider-kubernetes runs with `--enable-watches` and every Object has `spec.watch: true`,
 so the provider sees the deletion as it happens. `--poll=1m` is the fallback if a watch drops.
