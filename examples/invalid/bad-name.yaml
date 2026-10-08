@@ -1,0 +1,11 @@
+# Rejected by CEL: tenantName is not a valid namespace name
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: invalid-bad-name
+  namespace: default
+spec:
+  parameters:
+    tenantName: Dev_Frontend
+    cpuLimit: "2"
+    memoryLimit: "4Gi"

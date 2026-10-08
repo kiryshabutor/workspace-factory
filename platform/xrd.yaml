@@ -1,0 +1,75 @@
+# Workspace: the self-service API developers use on the control-plane cluster.
+# Namespaced XR (Crossplane v2): a developer creates it in their own namespace,
+# the composed resources land on fleet-cluster-1 through provider-kubernetes.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: workspaces.platform.local
+spec:
+  scope: Namespaced
+  group: platform.local
+  names:
+    kind: Workspace
+    plural: workspaces
+    shortNames: [ws]
+    categories: [crossplane]
+  defaultCompositionRef:
+    name: workspace-fleet
+  versions:
+    - name: v1
+      served: true
+      referenceable: true
+      additionalPrinterColumns:
+        - name: TENANT
+          type: string
+          jsonPath: .spec.parameters.tenantName
+        - name: CPU
+          type: string
+          jsonPath: .spec.parameters.cpuLimit
+        - name: MEMORY
+          type: string
+          jsonPath: .spec.parameters.memoryLimit
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [parameters]
+              properties:
+                parameters:
+                  type: object
+                  required: [tenantName, cpuLimit, memoryLimit]
+                  properties:
+                    tenantName:
+                      description: Name of the namespace created on the fleet cluster.
+                      type: string
+                      # maxLength also keeps the CEL cost of matches() within the API server budget.
+                      maxLength: 63
+                      x-kubernetes-validations:
+                        - rule: self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+                          message: tenantName must be a valid namespace name (lowercase letters, digits and '-', at most 63 characters)
+                        - rule: "!self.startsWith('kube-') && !(self in ['default', 'local-path-storage'])"
+                          message: tenantName must not be a system namespace
+                        - rule: self == oldSelf
+                          message: tenantName is immutable; create a new Workspace instead
+                    cpuLimit:
+                      description: Total CPU limit of the tenant namespace (ResourceQuota limits.cpu), e.g. "2" or "500m".
+                      type: string
+                      maxLength: 32
+                      x-kubernetes-validations:
+                        - rule: isQuantity(self)
+                          message: cpuLimit must be a Kubernetes quantity, e.g. "2" or "500m"
+                        # quantity() fails on an invalid string, so guard it with isQuantity().
+                        - rule: "!isQuantity(self) || quantity(self).compareTo(quantity('200m')) >= 0"
+                          message: cpuLimit must be at least 200m (two app pods during a rolling update)
+                    memoryLimit:
+                      description: Total memory limit of the tenant namespace (ResourceQuota limits.memory), e.g. "4Gi".
+                      type: string
+                      maxLength: 32
+                      x-kubernetes-validations:
+                        - rule: isQuantity(self)
+                          message: memoryLimit must be a Kubernetes quantity, e.g. "4Gi"
+                        - rule: "!isQuantity(self) || quantity(self).compareTo(quantity('256Mi')) >= 0"
+                          message: memoryLimit must be at least 256Mi (two app pods during a rolling update)

@@ -1,0 +1,10 @@
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: frontend-dev-env
+  namespace: default
+spec:
+  parameters:
+    tenantName: dev-frontend
+    cpuLimit: "2"
+    memoryLimit: "4Gi"

@@ -1,0 +1,11 @@
+# Rejected by CEL: cpuLimit is not a Kubernetes quantity
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: invalid-bad-quantity
+  namespace: default
+spec:
+  parameters:
+    tenantName: dev-frontend
+    cpuLimit: "two cores"
+    memoryLimit: "4Gi"

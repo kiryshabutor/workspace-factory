@@ -1,0 +1,11 @@
+# Rejected by CEL: memoryLimit is below the 256Mi minimum
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: invalid-too-small
+  namespace: default
+spec:
+  parameters:
+    tenantName: dev-frontend
+    cpuLimit: "2"
+    memoryLimit: "128Mi"

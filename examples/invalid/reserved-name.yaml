@@ -1,0 +1,11 @@
+# Rejected by CEL: tenantName is a system namespace
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: invalid-reserved-name
+  namespace: default
+spec:
+  parameters:
+    tenantName: kube-system
+    cpuLimit: "2"
+    memoryLimit: "4Gi"
