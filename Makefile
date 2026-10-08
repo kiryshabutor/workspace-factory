@@ -75,6 +75,35 @@ platform: ## Apply the Workspace API: XRD, Composition and the developer role.
 	$(KUBECTL) --context $(CP_CTX) wait --for=condition=Established --timeout=2m xrd/workspaces.platform.local
 	$(KUBECTL) --context $(CP_CTX) apply -f platform/composition.yaml -f platform/rbac.yaml
 
+##@ Test
+
+# Offline checks: no cluster needed, only docker (render runs the function and Crossplane in containers).
+# Images are pinned so the output does not change under us; the schema cache lives in ./bin.
+CROSSPLANE_IMAGE ?= xpkg.crossplane.io/crossplane/crossplane:v$(CROSSPLANE_VERSION)
+RENDER   = $(CROSSPLANE_CLI) composition render --include-full-xr --crossplane-image=$(CROSSPLANE_IMAGE) --xrd=platform/xrd.yaml
+VALIDATE = $(CROSSPLANE_CLI) resource validate --cache-dir=$(LOCALBIN)/cache --crossplane-image=$(CROSSPLANE_IMAGE)
+GOLDEN   = test/golden/workspace.yaml
+
+.PHONY: test
+test: $(CROSSPLANE_CLI) ## Render the example, diff against the golden file, validate schemas and CEL rules.
+	@# The render output is deterministic (hashed names, fixed timestamps), so the whole file is compared.
+	$(RENDER) examples/workspace.yaml platform/composition.yaml platform/functions.yaml | diff -u $(GOLDEN) -
+	$(VALIDATE) --skip-success-results platform/xrd.yaml,platform/provider.yaml $(GOLDEN)
+	@# Every file in examples/invalid breaks one CEL rule and must be rejected by that rule,
+	@# not by some other error (e.g. a failed schema download).
+	@for f in examples/invalid/*.yaml; do \
+		if $(VALIDATE) platform/xrd.yaml $$f 2>&1 | grep -q 'CEL validation error'; then \
+			echo "ok: $$f rejected by CEL"; \
+		else \
+			echo "FAIL: $$f was not rejected by a CEL rule"; exit 1; \
+		fi; \
+	done
+
+.PHONY: test-update
+test-update: $(CROSSPLANE_CLI) ## Regenerate the golden render output after an intended Composition change.
+	@mkdir -p $(dir $(GOLDEN))
+	$(RENDER) examples/workspace.yaml platform/composition.yaml platform/functions.yaml > $(GOLDEN)
+
 ##@ Tools
 
 LOCALBIN ?= $(CURDIR)/bin

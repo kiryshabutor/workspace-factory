@@ -1,0 +1,186 @@
+---
+apiVersion: platform.local/v1
+kind: Workspace
+metadata:
+  name: frontend-dev-env
+  namespace: default
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: frontend-dev-env-01afc351b6b8
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: frontend-dev-env-14106a73f405
+    - apiVersion: kubernetes.m.crossplane.io/v1alpha1
+      kind: Object
+      name: frontend-dev-env-5b6c9f01d171
+  parameters:
+    cpuLimit: "2"
+    memoryLimit: 4Gi
+    tenantName: dev-frontend
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: deployment, namespace, and resourcequota'
+    reason: Creating
+    status: "False"
+    type: Ready
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: deployment
+  generateName: frontend-dev-env-
+  labels:
+    crossplane.io/composite: frontend-dev-env
+  name: frontend-dev-env-14106a73f405
+  namespace: default
+  ownerReferences:
+  - apiVersion: platform.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Workspace
+    name: frontend-dev-env
+    uid: cf4cf871-7296-535b-a942-d0e0d847574a
+spec:
+  forProvider:
+    manifest:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        annotations:
+          platform.local/workspace: default/frontend-dev-env
+        labels:
+          app.kubernetes.io/managed-by: crossplane
+          app.kubernetes.io/name: welcome
+        name: welcome
+        namespace: dev-frontend
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app.kubernetes.io/name: welcome
+        template:
+          metadata:
+            labels:
+              app.kubernetes.io/name: welcome
+          spec:
+            containers:
+            - args:
+              - -text=Welcome, dev-frontend!
+              image: hashicorp/http-echo:1.0.0
+              name: welcome
+              ports:
+              - containerPort: 5678
+                name: http
+              readinessProbe:
+                httpGet:
+                  path: /
+                  port: http
+              resources:
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+                readOnlyRootFilesystem: true
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: fleet-cluster-1
+  readiness:
+    celQuery: object.status.conditions.exists(c, c.type == "Available" && c.status
+      == "True")
+    policy: DeriveFromCelQuery
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: namespace
+  generateName: frontend-dev-env-
+  labels:
+    crossplane.io/composite: frontend-dev-env
+  name: frontend-dev-env-01afc351b6b8
+  namespace: default
+  ownerReferences:
+  - apiVersion: platform.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Workspace
+    name: frontend-dev-env
+    uid: cf4cf871-7296-535b-a942-d0e0d847574a
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        annotations:
+          platform.local/workspace: default/frontend-dev-env
+        labels:
+          app.kubernetes.io/managed-by: crossplane
+        name: dev-frontend
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: fleet-cluster-1
+  watch: true
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: resourcequota
+  generateName: frontend-dev-env-
+  labels:
+    crossplane.io/composite: frontend-dev-env
+  name: frontend-dev-env-5b6c9f01d171
+  namespace: default
+  ownerReferences:
+  - apiVersion: platform.local/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Workspace
+    name: frontend-dev-env
+    uid: cf4cf871-7296-535b-a942-d0e0d847574a
+spec:
+  forProvider:
+    manifest:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata:
+        annotations:
+          platform.local/workspace: default/frontend-dev-env
+        labels:
+          app.kubernetes.io/managed-by: crossplane
+        name: workspace-quota
+        namespace: dev-frontend
+      spec:
+        hard:
+          limits.cpu: "2"
+          limits.memory: 4Gi
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: fleet-cluster-1
+  watch: true
